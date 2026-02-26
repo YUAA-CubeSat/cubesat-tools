@@ -48,6 +48,25 @@ char command[COMMAND_MAXSIZE];
 cmdtype_e cmdtype;
 uint8_t cmdnum;
 
+telcomerr_e globerr;
+
+typedef const char* (*cmdparser_t)(const char*);
+
+cmdparser_t cmdparsers[256] = {};
+
+const char* cmdparser_recitebeacon(const char* c)
+{
+    globerr = SUCCESS;
+
+    if(*c++ != ' ')
+    {
+        globerr = ERR_FORMAT;
+        return NULL;
+    }
+
+    return c;
+}
+
 /* -1 if invalid */
 static int charhex(char c)
 {
@@ -85,6 +104,13 @@ static telcomerr_e parse(void)
         return ERR_FORMAT;
     cmdnum |= nibble;
 
+    if(!cmdparsers[cmdnum])
+        return ERR_UNSUPPORTED;
+
+    c = cmdparsers[cmdnum](c);
+    if(!c)
+        return globerr;
+
     return SUCCESS;
 }
 
@@ -100,6 +126,11 @@ static telcomerr_e loadstrsafe(char* str)
     return SUCCESS;
 }
 
+void initparsers(void)
+{
+    cmdparsers[0xF0] = cmdparser_recitebeacon;
+}
+
 int main(int argc, char** argv)
 {
     int i;
@@ -113,6 +144,8 @@ int main(int argc, char** argv)
         printf("usage: telcomparse <commands>\n");
         return 1;
     }
+
+    initparsers();
 
     for(i=1; i<argc; i++)
     {
