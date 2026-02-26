@@ -4,8 +4,6 @@
 
 #define COMMAND_MAXSIZE 128
 
-char command[COMMAND_MAXSIZE];
-
 #define ERR_LIST \
     X(SUCCESS) \
     X(ERR_FORMAT) \
@@ -16,6 +14,10 @@ char command[COMMAND_MAXSIZE];
     X(ERR_FORBIDDEN) \
     X(ERR_UNSUPPORTED)
 
+#define CMDTYPE \
+    X(CMDTYPE_READ) \
+    X(CMDTYPE_WRITE) \
+
 typedef enum
 {
 #define X(code) code,
@@ -24,9 +26,45 @@ typedef enum
     NUMERR,
 } telcomerr_e;
 
+typedef enum
+{
+#define X(type) type,
+    CMDTYPE
+#undef X
+    NUMCMDTYPE,
+} cmdtype_e;
+
 #define X(code) #code,
 const char* errstrs[NUMERR] = { ERR_LIST };
 #undef X
+
+#define X(type) #type,
+const char* cmdtypestrs[NUMCMDTYPE] = { CMDTYPE };
+#undef X
+
+char command[COMMAND_MAXSIZE];
+
+cmdtype_e cmdtype;
+
+static telcomerr_e parse(void)
+{
+    const char *c;
+
+    c = command;
+    
+    if(strncmp(c, "YU+", 3))
+        return ERR_FORMAT;
+    c += 3;
+
+    if(*c == 'R')
+        cmdtype = CMDTYPE_READ;
+    else if(*c == 'W')
+        cmdtype = CMDTYPE_WRITE;
+    else
+        return ERR_FORMAT;
+
+    return SUCCESS;
+}
 
 static telcomerr_e loadstrsafe(char* str)
 {
@@ -57,12 +95,18 @@ int main(int argc, char** argv)
     for(i=1; i<argc; i++)
     {
         printf("---- command parse ----\n");
-        printf("command: %s\n", argv[i]);
         if((code = loadstrsafe(argv[i])) != SUCCESS)
         {
-            printf("code: %s\n\n", errstrs[code]);
+            printf("error: %s\n\n", errstrs[code]);
             continue;
         }
+        printf("command: %s\n", command);
+        if((code = parse()) != SUCCESS)
+        {
+            printf("error: %s\n\n", errstrs[code]);
+            continue;
+        }
+        printf("type: %s\n", cmdtypestrs[cmdtype]);
         printf("\n");
     }
     
