@@ -1,5 +1,6 @@
+#include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
-
 #include <string.h>
 
 #define COMMAND_MAXSIZE 128
@@ -45,10 +46,23 @@ const char* cmdtypestrs[NUMCMDTYPE] = { CMDTYPE };
 char command[COMMAND_MAXSIZE];
 
 cmdtype_e cmdtype;
+uint8_t cmdnum;
+
+/* -1 if invalid */
+static int charhex(char c)
+{
+    if(c >= '0' && c <= '9')
+        return c - '0';
+    if(c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
 
 static telcomerr_e parse(void)
 {
     const char *c;
+
+    int nibble;
 
     c = command;
     
@@ -62,6 +76,14 @@ static telcomerr_e parse(void)
         cmdtype = CMDTYPE_WRITE;
     else
         return ERR_FORMAT;
+    c++;
+
+    if((nibble = charhex(*c++)) == -1)
+        return ERR_FORMAT;
+    cmdnum = nibble << 4;
+    if((nibble = charhex(*c++)) == -1)
+        return ERR_FORMAT;
+    cmdnum |= nibble;
 
     return SUCCESS;
 }
@@ -107,6 +129,7 @@ int main(int argc, char** argv)
             continue;
         }
         printf("type: %s\n", cmdtypestrs[cmdtype]);
+        printf("command id: %"PRIX8"\n", cmdnum);
         printf("\n");
     }
     
