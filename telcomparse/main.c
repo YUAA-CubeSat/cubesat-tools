@@ -6,22 +6,45 @@
 
 char command[COMMAND_MAXSIZE];
 
-/* return 1 if failed, 0 if success */
-static int loadstrsafe(char* str)
+#define ERR_LIST \
+    X(SUCCESS) \
+    X(ERR_FORMAT) \
+    X(ERR_CRC) \
+    X(ERR_FAULT_X) \
+    X(ERR_RES_LOCKED) \
+    X(ERR_RUNTIME) \
+    X(ERR_FORBIDDEN) \
+    X(ERR_UNSUPPORTED)
+
+typedef enum
+{
+#define X(code) code,
+    ERR_LIST
+#undef X
+    NUMERR,
+} telcomerr_e;
+
+#define X(code) #code,
+const char* errstrs[NUMERR] = { ERR_LIST };
+#undef X
+
+static telcomerr_e loadstrsafe(char* str)
 {
     int len;
 
     len = strlen(str);
     if(len >= COMMAND_MAXSIZE)
-        return 1;
+        return ERR_FORMAT;
 
     strcpy(command, str);
-    return 0;
+    return SUCCESS;
 }
 
 int main(int argc, char** argv)
 {
     int i;
+
+    telcomerr_e code;
 
     printf("\n============ telcomparse ============\n\n");
 
@@ -35,9 +58,9 @@ int main(int argc, char** argv)
     {
         printf("---- command parse ----\n");
         printf("command: %s\n", argv[i]);
-        if(loadstrsafe(argv[i]))
+        if((code = loadstrsafe(argv[i])) != SUCCESS)
         {
-            printf("error: ERR_FORMAT\n\n");
+            printf("code: %s\n\n", errstrs[code]);
             continue;
         }
         printf("\n");
