@@ -1,81 +1,20 @@
 #include <inttypes.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "parsers.h"
+#include "telcomparse.h"
+
 #define COMMAND_MAXSIZE 128
-
-#define ERR_LIST \
-    X(SUCCESS) \
-    X(ERR_FORMAT) \
-    X(ERR_CRC) \
-    X(ERR_FAULT_X) \
-    X(ERR_RES_LOCKED) \
-    X(ERR_RUNTIME) \
-    X(ERR_FORBIDDEN) \
-    X(ERR_UNSUPPORTED)
-
-#define CMDTYPE \
-    X(CMDTYPE_READ) \
-    X(CMDTYPE_WRITE) \
-
-typedef enum
-{
-#define X(code) code,
-    ERR_LIST
-#undef X
-    NUMERR,
-} telcomerr_e;
-
-typedef enum
-{
-#define X(type) type,
-    CMDTYPE
-#undef X
-    NUMCMDTYPE,
-} cmdtype_e;
-
-#define X(code) #code,
-const char* errstrs[NUMERR] = { ERR_LIST };
-#undef X
-
-#define X(type) #type,
-const char* cmdtypestrs[NUMCMDTYPE] = { CMDTYPE };
-#undef X
-
-char command[COMMAND_MAXSIZE];
-
-cmdtype_e cmdtype;
-uint8_t cmdnum;
-
-telcomerr_e globerr;
 
 typedef const char* (*cmdparser_t)(const char*);
 
 cmdparser_t cmdparsers[256] = {};
+char command[COMMAND_MAXSIZE];
 
-const char* cmdparser_recitebeacon(const char* c)
-{
-    globerr = SUCCESS;
-
-    if(*c++ != ' ')
-    {
-        globerr = ERR_FORMAT;
-        return NULL;
-    }
-
-    return c;
-}
-
-/* -1 if invalid */
-static int charhex(char c)
-{
-    if(c >= '0' && c <= '9')
-        return c - '0';
-    if(c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
+cmdtype_e cmdtype;
+uint8_t cmdnum;
+telcomerr_e globerr;
 
 static telcomerr_e parse(void)
 {
@@ -107,6 +46,7 @@ static telcomerr_e parse(void)
     if(!cmdparsers[cmdnum])
         return ERR_UNSUPPORTED;
 
+    globerr = SUCCESS;
     c = cmdparsers[cmdnum](c);
     if(!c)
         return globerr;
@@ -128,7 +68,9 @@ static telcomerr_e loadstrsafe(char* str)
 
 void initparsers(void)
 {
-    cmdparsers[0xF0] = cmdparser_recitebeacon;
+    #define X(enumid, name, id) cmdparsers[id] = cmdparser_##name;
+    CMD_LIST
+    #undef X
 }
 
 int main(int argc, char** argv)
