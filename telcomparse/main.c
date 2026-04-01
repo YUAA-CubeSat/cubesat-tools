@@ -2,14 +2,18 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "executors.h"
 #include "parsers.h"
 #include "telcomparse.h"
 
 #define COMMAND_MAXSIZE 128
 
 typedef const char* (*cmdparser_t)(const char*);
+/* return 0 for success, nonzero for error */
+typedef int (*cmdexecutor_t)(void);
 
 cmdparser_t cmdparsers[256] = {};
+cmdexecutor_t cmdexecutors[256] = {};
 char command[COMMAND_MAXSIZE];
 
 cmdtype_e cmdtype;
@@ -73,6 +77,13 @@ void initparsers(void)
     #undef X
 }
 
+void initexecutors(void)
+{
+    #define X(enumid, name, id) cmdexecutors[id] = cmdexecutor_##name;
+    CMD_LIST
+    #undef X
+}
+
 int main(int argc, char** argv)
 {
     int i;
@@ -88,6 +99,7 @@ int main(int argc, char** argv)
     }
 
     initparsers();
+    initexecutors();
 
     for(i=1; i<argc; i++)
     {
@@ -105,6 +117,15 @@ int main(int argc, char** argv)
         }
         printf("type: %s\n", cmdtypestrs[cmdtype]);
         printf("command id: %"PRIX8"\n", cmdnum);
+        if(cmdexecutors[cmdnum])
+        {
+            printf("command payload:\n");
+            if((code = cmdexecutors[cmdnum]()))
+            {
+                printf("execution error: %s\n\n", errstrs[globerr]);
+                continue;
+            }
+        }
         printf("\n");
     }
     
