@@ -1,3 +1,6 @@
 [submodule "cspice"]
 	path = cspice
 	url = https://github.com/arturania/cspice.git
+[submodule "common/zlib"]
+	path = common/zlib
+	url = https://github.com/madler/zlib.git
