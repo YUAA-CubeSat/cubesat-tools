@@ -4,3 +4,4 @@
 [submodule "common/zlib"]
 	path = common/zlib
 	url = https://github.com/madler/zlib.git
+	ignore = all
