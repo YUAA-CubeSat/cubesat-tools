@@ -27,14 +27,18 @@ VECINFO_OBJ = $(addprefix $(OBJ_DIR)/, $(addsuffix .o, $(VECINFO_SRC)))
 VECINFO_BIN = $(BIN_DIR)/vecinfo
 
 TELCOMPARSE_DIR = telcomparse
-TELCOMPARSE_SRC = $(wildcard $(TELCOMPARSE_DIR)/*.c)
+TELCOMPARSE_SRC = $(filter-out $(TELCOMPARSE_DIR)/test_%.c, $(wildcard $(TELCOMPARSE_DIR)/*.c))
 TELCOMPARSE_OBJ = $(addprefix $(OBJ_DIR)/, $(addsuffix .o, $(TELCOMPARSE_SRC)))
 TELCOMPARSE_BIN = $(BIN_DIR)/telcomparse
+
+TELCOMPARSE_TEST_SRC = $(TELCOMPARSE_DIR)/test_parsers.c $(TELCOMPARSE_DIR)/parsers.c
+TELCOMPARSE_TEST_OBJ = $(addprefix $(OBJ_DIR)/, $(addsuffix .o, $(TELCOMPARSE_TEST_SRC)))
+TELCOMPARSE_TEST_BIN = $(BIN_DIR)/test_telcomparse
 
 ZLIB_DIR = common/zlib
 ZLIB_LIB = $(ZLIB_DIR)/libz.a
 
-.PHONY: all common sunvec cspice vecinfo telcomparse zlib clean mkdirs
+.PHONY: all common sunvec cspice vecinfo telcomparse test_telcomparse zlib clean mkdirs
 
 all: common cspice sunvec vecinfo telcomparse
 
@@ -57,6 +61,12 @@ $(ZLIB_LIB):
 	cd $(ZLIB_DIR) && ./configure && $(MAKE)
 
 telcomparse: common zlib $(TELCOMPARSE_BIN)
+
+test_telcomparse: $(TELCOMPARSE_TEST_BIN)
+
+$(TELCOMPARSE_TEST_BIN): $(TELCOMPARSE_TEST_OBJ)
+	@mkdir -p $(BIN_DIR)
+	$(CC) $(LDFLAGS) $(TELCOMPARSE_TEST_OBJ) -o $(TELCOMPARSE_TEST_BIN)
 
 $(OBJ_DIR)/$(COM_DIR)/%.c.o: $(COM_DIR)/%.c
 	@mkdir -p $(OBJ_DIR)
