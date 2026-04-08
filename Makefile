@@ -31,13 +31,17 @@ TELCOMPARSE_SRC = $(wildcard $(TELCOMPARSE_DIR)/*.c)
 TELCOMPARSE_OBJ = $(addprefix $(OBJ_DIR)/, $(addsuffix .o, $(TELCOMPARSE_SRC)))
 TELCOMPARSE_BIN = $(BIN_DIR)/telcomparse
 
-.PHONY: all common sunvec cspice vecinfo telcomparse clean mkdirs
+ZLIB_DIR = common/zlib
+ZLIB_LIB = $(ZLIB_DIR)/libz.a
+
+.PHONY: all common sunvec cspice vecinfo telcomparse zlib clean mkdirs
 
 all: common cspice sunvec vecinfo telcomparse
 
 clean:
 	rm -rf $(BIN_DIR)
 	rm -rf $(OBJ_DIR)
+	$(MAKE) -C $(ZLIB_DIR) distclean 2>/dev/null; true
 
 common: $(COM_OBJ)
 
@@ -47,7 +51,12 @@ sunvec: common cspice $(SUNVEC_BIN)
 
 vecinfo: common $(VECINFO_BIN)
 
-telcomparse: common $(TELCOMPARSE_BIN)
+zlib: $(ZLIB_LIB)
+
+$(ZLIB_LIB):
+	cd $(ZLIB_DIR) && ./configure && $(MAKE)
+
+telcomparse: common zlib $(TELCOMPARSE_BIN)
 
 $(OBJ_DIR)/$(COM_DIR)/%.c.o: $(COM_DIR)/%.c
 	@mkdir -p $(OBJ_DIR)
@@ -81,8 +90,8 @@ $(VECINFO_BIN): $(VECINFO_OBJ)
 $(OBJ_DIR)/$(TELCOMPARSE_DIR)/%.c.o: $(TELCOMPARSE_DIR)/%.c
 	@mkdir -p $(OBJ_DIR)
 	@mkdir -p $(OBJ_DIR)/$(TELCOMPARSE_DIR)
-	$(CC) $(STRICTCFLAGS) $(CFLAGS) -I$(COM_DIR) -c $< -o $@
+	$(CC) $(STRICTCFLAGS) $(CFLAGS) -I$(COM_DIR) -I$(ZLIB_DIR) -c $< -o $@
 
 $(TELCOMPARSE_BIN): $(TELCOMPARSE_OBJ)
 	@mkdir -p $(BIN_DIR)
-	$(CC) $(LDFLAGS) $(COM_OBJ) $(TELCOMPARSE_OBJ) -o $(TELCOMPARSE_BIN)
+	$(CC) $(LDFLAGS) $(COM_OBJ) $(TELCOMPARSE_OBJ) $(ZLIB_LIB) -o $(TELCOMPARSE_BIN)

@@ -33,8 +33,8 @@ static uint64_t parserawu64(const char* c)
 
 const char* cmdparser_recitebeacon(const char* c)
 {
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -71,8 +71,8 @@ const char* cmdparser_setpowerbounds(const char* c)
         info->duration |= digit << (12-i*4);
     }
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -86,8 +86,8 @@ const char* cmdparser_setpowerthresh(const char* c)
 const char* cmdparser_settempthresh(const char* c)
 {
     /* W only: YU+WF8 [C..C] - 128 bytes of temp data follow in a second packet */
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -123,8 +123,8 @@ const char* cmdparser_linkspeed(const char* c)
         info->rfmode |= digit << (4-i*4);
     }
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -148,8 +148,8 @@ const char* cmdparser_setcpuspeed(const char* c)
         info->freqmhz |= digit << (4-i*4);
     }
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -164,15 +164,15 @@ const char* cmdparser_obctime(const char* c)
 
     if(cmdtype == CMDTYPE_READ)
     {
-        if(*c++ != ' ')
-            PARSERR(ERR_FORMAT)
+        if(*c == ' ')
+            c++;
     }
     else
     {
         info->timestamp = parserawu64(c);
         c += 8;
-        if(*c++ != ' ')
-            PARSERR(ERR_FORMAT)
+        if(*c == ' ')
+            c++;
     }
 
     return c;
@@ -182,8 +182,8 @@ const char* cmdparser_useresetcounts(const char* c)
 {
     /* R: YU+R12 [C..C]
      * W: YU+W12 [C..C]  - no inline args, clears all counters */
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -191,8 +191,8 @@ const char* cmdparser_useresetcounts(const char* c)
 const char* cmdparser_logstatus(const char* c)
 {
     /* YU+R15 [C..C] */
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -227,8 +227,8 @@ const char* cmdparser_logsinrange(const char* c)
     info->endtime = parserawu64(c);
     c += 8;
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -262,8 +262,8 @@ const char* cmdparser_clearlogrange(const char* c)
     info->endtime = parserawu64(c);
     c += 8;
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -287,8 +287,8 @@ const char* cmdparser_setpasstimes(const char* c)
         info->numpasses |= digit << (4-i*4);
     }
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -323,8 +323,8 @@ const char* cmdparser_setradtimeouts(const char* c)
             PARSERR(ERR_FORMAT)
     }
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -348,8 +348,8 @@ const char* cmdparser_setgndtimeouts(const char* c)
         info->numcoords |= digit << (4-i*4);
     }
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -365,8 +365,8 @@ const char* cmdparser_toggleggb(const char* c)
         PARSERR(ERR_FORMAT)
     info->enable = *c++ - '0';
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -382,8 +382,8 @@ const char* cmdparser_ggbextension(const char* c)
 
     if(cmdtype == CMDTYPE_READ)
     {
-        if(*c++ != ' ')
-            PARSERR(ERR_FORMAT)
+        if(*c == ' ')
+            c++;
     }
     else
     {
@@ -393,8 +393,8 @@ const char* cmdparser_ggbextension(const char* c)
         if(end == c || info->extension < 0.0f)
             PARSERR(ERR_INV_ARG)
         c = end;
-        if(*c++ != ' ')
-            PARSERR(ERR_FORMAT)
+        if(*c == ' ')
+            c++;
     }
 
     return c;
@@ -413,8 +413,8 @@ const char* cmdparser_setggbtarget(const char* c)
         PARSERR(ERR_INV_ARG)
     c = end;
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -438,8 +438,8 @@ const char* cmdparser_setggbspeed(const char* c)
         info->speed |= digit << (4-i*4);
     }
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -455,8 +455,8 @@ const char* cmdparser_togglesunreq(const char* c)
         PARSERR(ERR_FORMAT)
     info->requiresun = *c++ - '0';
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -480,8 +480,8 @@ const char* cmdparser_setsunpos(const char* c)
         info->firstvectime = (info->firstvectime << 4) | (uint64_t)digit;
     }
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -497,8 +497,8 @@ const char* cmdparser_toggledetumb(const char* c)
         PARSERR(ERR_FORMAT)
     info->enable = *c++ - '0';
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -514,8 +514,8 @@ const char* cmdparser_setmtqpolar(const char* c)
         PARSERR(ERR_FORMAT)
     info->invert = *c++ - '0';
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -545,8 +545,8 @@ const char* cmdparser_setadcsthresh(const char* c)
         c += 4;
     }
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -554,8 +554,8 @@ const char* cmdparser_setadcsthresh(const char* c)
 const char* cmdparser_settle(const char* c)
 {
     /* YU+W44 [C..C]  - TLE lines come in follow-up packets */
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -563,8 +563,8 @@ const char* cmdparser_settle(const char* c)
 const char* cmdparser_getattmat(const char* c)
 {
     /* YU+R45 [C..C] */
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -572,8 +572,8 @@ const char* cmdparser_getattmat(const char* c)
 const char* cmdparser_getomega(const char* c)
 {
     /* YU+R46 [C..C] */
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -581,8 +581,8 @@ const char* cmdparser_getomega(const char* c)
 const char* cmdparser_getpos(const char* c)
 {
     /* YU+R47 [C..C] */
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -590,8 +590,8 @@ const char* cmdparser_getpos(const char* c)
 const char* cmdparser_getphase(const char* c)
 {
     /* YU+R48 [C..C] */
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -599,8 +599,8 @@ const char* cmdparser_getphase(const char* c)
 const char* cmdparser_getbdot(const char* c)
 {
     /* YU+R49 [C..C] */
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -608,8 +608,8 @@ const char* cmdparser_getbdot(const char* c)
 const char* cmdparser_getbodyvecs(const char* c)
 {
     /* YU+R4B [C..C] */
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -668,8 +668,8 @@ const char* cmdparser_setmtqtime(const char* c)
         *components[j] = (int8_t)val;
     }
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
@@ -687,8 +687,8 @@ const char* cmdparser_setpulsbins(const char* c)
     for(i=0; i<8; i++)
         info->dacoutputs[i] = (uint8_t)*c++;
 
-    if(*c++ != ' ')
-        PARSERR(ERR_FORMAT)
+    if(*c == ' ')
+        c++;
 
     return c;
 }
