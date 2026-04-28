@@ -1,35 +1,24 @@
-/*!
- * @file power_test.c
- * @brief Single-scenario driver that demonstrates every parameter you
- *        can tweak to exercise power_dist.c off-target.
- *
- * The point of this file is to show the full "interface" between a
- * test and the power-distribution module:
- *
- *   1. PowerSim_Config_t  – all the simulated-hardware inputs you
- *                           can script BEFORE running the task.
- *   2. PowerDist_X_Task() – the unit-under-test. In the real firmware
- *                           it runs forever under FreeRTOS; here it
- *                           returns when the sim forces an EPS error
- *                           at cfg.stop_after_minutes.
- *   3. PowerSim_State_t   – everything the sim observed WHILE the
- *                           task ran (battery voltage, how many times
- *                           each stub was called, which level the
- *                           task last commanded, etc.).
- *   4. PowerDist_Test*()  – direct read-only handles on the module's
- *                           internal static state (consumption buffer,
- *                           cached SoC, current orbit phase) so you
- *                           can assert on internals after the run.
- *
- * To add more scenarios: copy `run_scenario()`, change the config,
- * call it from main(). No other files need to change.
- */
-
 #include "power_dist.h"
 #include "power_sim.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "power_dist.c"
+#include "power_sim.c"
+#include "eps_extra.c"
+
+static const char *phase_name(ORBIT_PHASE p)
+{
+    switch (p) {
+    case PHASE_UNKNOWN: return "UNK";
+    case PHASE_DARK:    return "DARK";
+    case PHASE_SUN:     return "SUN";
+    case PHASE_ERR:     return "ERR";
+    default:            return "?";
+    }
+}
 
 static void print_config(const PowerSim_Config_t *c)
 {
@@ -42,8 +31,12 @@ static void print_config(const PowerSim_Config_t *c)
            c->sun_minutes);
     printf("  dark_minutes        = %u min        (length of DARK phase per orbit)\n",
            c->dark_minutes);
-    printf("  solar_gen_W         = %.2f W        (panel power while in sun)\n",
+    printf("  solar_gen_W         = %.2f W        (raw panel capability in sun)\n",
            (double)c->solar_gen_W);
+    printf("  eoc_voltage         = %.2f V        (charger CV cut-off, EPS Table 1)\n",
+           (double)c->eoc_voltage);
+    printf("  charge_current_A    = %.3f A       (CC current limit, charge mode)\n",
+           (double)c->charge_current_A);
     printf("  pwrlvl_draw_W       = L0:%.2f L1:%.2f L2:%.2f L3:%.2f L4:%.2f W\n",
            (double)c->pwrlvl_draw_W[L0], (double)c->pwrlvl_draw_W[L1],
            (double)c->pwrlvl_draw_W[L2], (double)c->pwrlvl_draw_W[L3],
@@ -56,21 +49,10 @@ static void print_config(const PowerSim_Config_t *c)
            c->stop_after_minutes);
 }
 
-static const char *phase_name(ORBIT_PHASE p)
+static void print_final_state(void)
 {
-    switch (p) {
-    case PHASE_UNKNOWN: return "UNKNOWN";
-    case PHASE_DARK:    return "DARK";
-    case PHASE_SUN:     return "SUN";
-    case PHASE_ERR:     return "ERR";
-    default:            return "?";
-    }
-}
-
-static void print_state_and_internals(void)
-{
-    const PowerSim_State_t              *s   = PowerSim_GetState();
-    const PowerDist_ConsumptionBuffer_t  *cb = PowerDist_TestGetConsBuf();
+    const PowerSim_State_t              *s  = PowerSim_GetState();
+    const PowerDist_ConsumptionBuffer_t *cb = &s_pd_state.cons_buf;
 
     printf("\nSimulation outputs (PowerSim_State_t):\n");
     printf("  elapsed_minutes     = %u min\n", s->elapsed_minutes);
@@ -82,58 +64,214 @@ static void print_state_and_internals(void)
     printf("  panic_count         = %u\n",     s->panic_count);
     printf("  task_exited         = %d\n",     s->task_exited);
 
-    printf("\nPowerDist internal state (via PowerDist_Test* hooks):\n");
-    printf("  battChg_cache       = %.3f %%\n", (double)PowerDist_TestGetBattChgCache());
-    printf("  currPhase           = %s\n",    phase_name(PowerDist_TestGetCurrPhase()));
-    printf("  consumptionBuffer.len   = %u\n", cb->len);
-    printf("  consumptionBuffer.index = %u\n", cb->index);
-    printf("  consumptionBuffer.five_min_consumption[] =");
+    printf("\nPowerDist internal state (s_pd_state):\n");
+    printf("  currPhase              = %s\n", phase_name(s_pd_state.curr_phase));
+    printf("  consumptionBuffer.len  = %u\n", cb->len);
+    printf("  consumptionBuffer.head = %u\n", cb->head);
+    printf("  consumptionBuffer.samples_W[] =");
     for (int i = 0; i < POWERDIST_CONSBUF_NUM_ELTS; ++i) {
         if (i % 6 == 0) printf("\n    ");
-        printf(" %+8.3f", (double)cb->five_min_consumption[i]);
+        printf(" %+8.3f", (double)cb->samples_W[i]);
     }
     printf("\n");
 }
 
-int main(void)
+static void print_trace_header(void)
 {
-    printf("YUAA CubeSat – power_dist single-scenario driver\n");
-    printf("=================================================\n\n");
+    printf("\n--- per-minute trace (logged at each vTaskDelay call) ---\n");
+    printf("Columns:\n");
+    printf("  tick     s_pd_state.tick_min at end of iteration\n");
+    printf("  sim      PowerSim elapsed_minutes (sim clock)\n");
+    printf("  vbatt    V_Batt cached by CRITICAL_CHECK this tick\n");
+    printf("  soc%%     SoC derived from vbatt via PowerDist_GetSoC\n");
+    printf("  phase    s_pd_state.curr_phase AFTER step_sun_tracker\n");
+    printf("  accDur   curr_phase_acc.duration_min (includes trailing darks)\n");
+    printf("  tdark    trailing_dark_min (debounce counter)\n");
+    printf("  accWmin  curr_phase_acc.total_gen_Wmin (running integral)\n");
+    printf("  lfv      last_full_valid flag\n");
+    printf("  lfDur    last_full_phase.duration_min (pure sun minutes)\n");
+    printf("  lfWmin   last_full_phase.total_gen_Wmin\n");
+    printf("  avgW     solar_avg_W_orbit_averaged() (what CONSUME_DECIDE sees)\n");
+    printf("  lvl      current power level commanded to SysMan\n");
+    printf("  cLen     consumption ring-buffer length\n");
+    printf("\n");
+    printf("%4s %4s %7s %6s %5s %6s %5s %8s %3s %5s %8s %7s %3s %4s\n",
+           "tick", "sim", "vbatt", "soc%", "phase",
+           "accDur", "tdark", "accWmin",
+           "lfv", "lfDur", "lfWmin", "avgW",
+           "lvl", "cLen");
+    printf("---- ---- ------- ------ ----- ------ ----- -------- --- ----- -------- ------- --- ----\n");
+}
 
-    /* ---- 1. Build the full scenario configuration. -------------- */
-    /* Every field of PowerSim_Config_t is listed explicitly so it's
-     * obvious which inputs drive the module. Change any value and
-     * rerun `make run` to see how the task responds.              */
+static void log_tick(void)
+{
+    const PowerSim_State_t *s   = PowerSim_GetState();
+    const SolarPhase_t     *acc = &s_pd_state.curr_phase_acc;
+    const SolarPhase_t     *lf  = &s_pd_state.last_full_phase;
+    const float             avg = solar_avg_W_orbit_averaged();
+    const float             vb  = s_pd_state.batt_V_tick.V_Batt;
+    const float             soc = PowerDist_GetSoC(vb);
+
+    printf("%4u %4u %7.3f %6.2f %5s %6u %5u %8.2f %3d %5u %8.2f %7.3f L%d %4u\n",
+           s_pd_state.tick_min,
+           s->elapsed_minutes,
+           (double)vb,
+           (double)soc,
+           phase_name(s_pd_state.curr_phase),
+           (unsigned)acc->duration_min,
+           (unsigned)s_pd_state.trailing_dark_min,
+           (double)acc->total_gen_Wmin,
+           (int)s_pd_state.last_full_valid,
+           (unsigned)lf->duration_min,
+           (double)lf->total_gen_Wmin,
+           (double)avg,
+           (int)s->current_level,
+           (unsigned)s_pd_state.cons_buf.len);
+}
+
+void vTaskDelay(uint32_t ticks_ms)
+{
+    uint32_t minutes = ticks_ms / (60u * 1000u);
+    if (minutes == 0) minutes = 1;
+
+    for (uint32_t i = 0; i < minutes; ++i) {
+        log_tick();
+        PowerSim_AdvanceOneMinute();
+    }
+}
+
+typedef struct {
+    const char       *name;
+    const char       *description;
     PowerSim_Config_t cfg;
-    memset(&cfg, 0, sizeof(cfg));
+    Sys_PowerLevel_e start_level;
+} Scenario_t;
 
-    cfg.initial_vbatt       = 4.0f;            /* ≈ 77 %% SoC at start       */
-    cfg.capacity_wmin       = 10.2f * 60.0f;   /* matches EPS_CAPACITY       */
-    cfg.sun_minutes         = 60;              /* 1 hour sun per orbit       */
-    cfg.dark_minutes        = 30;              /* 30 min eclipse per orbit   */
-    cfg.solar_gen_W         = 6.0f;            /* panel power while in sun   */
-    cfg.pwrlvl_draw_W[L0]   = 0.5f;
-    cfg.pwrlvl_draw_W[L1]   = 1.0f;
-    cfg.pwrlvl_draw_W[L2]   = 2.0f;
-    cfg.pwrlvl_draw_W[L3]   = 4.0f;
-    cfg.pwrlvl_draw_W[L4]   = 7.0f;            /* satellite busy at L4       */
-    cfg.fail_eps_on_call    = 0;               /* no injected EPS fault      */
-    cfg.fail_sun_on_call    = 0;               /* no injected SunDetect err. */
-    cfg.stop_after_minutes  = 120;             /* run for 2 orbits = 120 min */
+#define DRAW_L0_W   0.400f
+#define DRAW_L1_W   0.733f
+#define DRAW_L2_W   1.000f
+#define DRAW_L3_W   1.667f
+#define DRAW_L4_W   2.800f
 
-    print_config(&cfg);
+static void scenario_base_cfg(PowerSim_Config_t *c)
+{
+    memset(c, 0, sizeof(*c));
+    c->initial_vbatt       = 3.9f;                    /* ~58.87% SoC        */
+    c->capacity_wmin       = EPS_BATT_CAPACITY_WMIN;  /* 10.2 Wh (CDR sl.3) */
+    c->sun_minutes         = 60;                      /* context L315       */
+    c->dark_minutes        = 30;                      /* 90-min orbit       */
+    c->pwrlvl_draw_W[L0]   = DRAW_L0_W;
+    c->pwrlvl_draw_W[L1]   = DRAW_L1_W;
+    c->pwrlvl_draw_W[L2]   = DRAW_L2_W;
+    c->pwrlvl_draw_W[L3]   = DRAW_L3_W;
+    c->pwrlvl_draw_W[L4]   = DRAW_L4_W;
+    /* Charger model: EPS I defaults (User Manual Table 1). */
+    c->eoc_voltage         = 4.10f;   /* End-of-charge cut-off        */
+    c->charge_current_A    = 0.460f;  /* Mode 2 default (230/460/690) */
+    c->fail_eps_on_call    = 0;
+    c->fail_sun_on_call    = 0;
+}
 
-    /* ---- 2. Reset the simulator to that config. ----------------- */
-    PowerSim_Reset(&cfg);
+static void run_scenario(const Scenario_t *sc)
+{
+    printf("\n");
+    printf("==================================================================\n");
+    printf("Scenario: %s\n", sc->name);
+    printf("------------------------------------------------------------------\n");
+    printf("%s\n", sc->description);
+    printf("==================================================================\n");
 
-    /* ---- 3. Run the unit under test. ---------------------------- */
-    /* The task loops internally. It terminates when the sim returns
-     * HAL_ERROR from EPS_R_Voltages, which happens automatically
-     * once cfg.stop_after_minutes is reached.                     */
+    memset(&s_pd_state, 0, sizeof(s_pd_state));
+
+    print_config(&sc->cfg);
+    PowerSim_Reset(&sc->cfg);
+    if (sc->start_level < NumPwrLvls) {
+        Sys_X_SetPowerLevel(sc->start_level);
+        printf("  start_level         = L%d (override; default is L4)\n",
+               (int)sc->start_level);
+    }
+    print_trace_header();
+
     PowerDist_X_Task(NULL);
 
-    /* ---- 4. Read back what happened. ---------------------------- */
-    print_state_and_internals();
+    print_final_state();
+}
+
+static Scenario_t scenarios_build(int which)
+{
+    Scenario_t s;
+    scenario_base_cfg(&s.cfg);
+    s.start_level = NumPwrLvls;   /* default: use sim's boot level (L4) */
+
+    switch (which) {
+    case 0:
+        s.name = "S1 nominal tidal-lock w/ spin (2.7 Wh/orbit harvest)";
+        s.description =
+            "  solar_gen_W = 4.00 W in sun -> orbit-avg 2.67 W.\n"
+            "  L4 draws 2.80 W -> deficit ~0.13 W.\n"
+            "  Expected: at the first decision tick (~tick 90) the ladder\n"
+            "  drops L4 -> L3. Thereafter, surplus at L3 is 1.00 W, which is\n"
+            "  below the 1.133 * 1.25 = 1.42 W needed to climb back: stable.";
+        s.cfg.solar_gen_W        = 4.00f;
+        s.cfg.stop_after_minutes = 300;   /* ~3 orbits */
+        break;
+    case 1:
+        s.name = "S2 rich harvest climb (6 W panel, start at L2)";
+        s.description =
+            "  solar_gen_W = 6.00 W raw panel capability in sun. The EPS\n"
+            "  charger caps absorption at charge_current_A * V_batt \n"
+            "  (Mode 2: ~1.84 W @ 4.0 V), so the MPPT throttles delivered\n"
+            "  power to load + charge_accepted. start_level = L2 (override).\n"
+            "\n"
+            "  Expected at first decision (tick 90):\n"
+            "    avgW ~ (load + charge_accepted) * 60/90\n"
+            "         = (1.00 + 1.79) * 0.667 ~ 1.86 W\n"
+            "    cons ~ 1.00 W -> surplus ~ 0.86 W.\n"
+            "    L2 -> L3 climb needs 0.667*1.25 = 0.83 W  (fits, climbs).\n"
+            "    L3 -> L4 climb needs 1.133*1.25 = 1.42 W (does not fit).\n"
+            "  So ladder lands on L3, not L4. Demonstrates that CC charger\n"
+            "  limits the orbit-averaged harvest even when panels are rich.";
+        s.cfg.solar_gen_W        = 6.00f;
+        s.cfg.stop_after_minutes = 300;
+        s.start_level            = L2;
+        break;
+    case 2:
+        s.name = "S3 lean month / edge-on orbit (1.33 W orbit-avg)";
+        s.description =
+            "  solar_gen_W = 2.00 W in sun -> orbit-avg 1.33 W.\n"
+            "  L4 draws 2.80 W -> deficit ~1.47 W.\n"
+            "  Expected: single decision walks L4 -> L3 -> L2 in one step\n"
+            "  (recovered 1.133+0.667 = 1.80 W covers the deficit), then\n"
+            "  sits on the GLOBAL_PWRLVL_FLOOR at L2.";
+        s.cfg.solar_gen_W        = 2.00f;
+        s.cfg.stop_after_minutes = 300;
+        break;
+    case 3:
+        s.name = "S4 danger-zone blackout (phase harvest < 36 W*min)";
+        s.description =
+            "  solar_gen_W = 0.50 W in sun -> phase harvest 30 W*min,\n"
+            "  below DANGER_ZONE_PHASE_WMIN (36). Even L0 is net-deficit.\n"
+            "  Expected: once the first sun phase closes and the ring fills,\n"
+            "  the danger-zone short-circuit forces L0 (bypasses the L2 floor).";
+        s.cfg.solar_gen_W        = 0.50f;
+        s.cfg.stop_after_minutes = 220;
+        break;
+    default:
+        s.name        = "(invalid)";
+        s.description = "";
+        s.cfg.stop_after_minutes = 0;
+    }
+    return s;
+}
+
+#define NUM_SCENARIOS  4
+
+int main(void)
+{
+    for (int i = 0; i < NUM_SCENARIOS; ++i) {
+        Scenario_t sc = scenarios_build(i);
+        run_scenario(&sc);
+    }
 
     return 0;
 }
